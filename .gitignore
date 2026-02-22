@@ -1,0 +1,15 @@
+# Output files
+*.tif
+*.tiff
+
+# QuPath project files
+*.qpproj
+*.qpdata
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,25 @@
+0: Background
+1: Abnormal secretions
+2: Adipose tissue
+3: Artifact
+4: Atypical intraductal proliferation
+5: Bening gland
+6: Blood vessels
+7: Fibromuscular bundles
+8: High grade prostatic intraepithelial neoplasia (HGPIN)
+9: Immune cells
+10: Intestinal glands and mucus
+11: Intraductal carcinoma
+12: Mitosis
+13: Muscle
+14: Necrosis
+15: Negative
+16: Nerve
+17: Nerve ganglion
+18: Normal secretions
+19: Prominent nucleolus
+20: Red blood cells
+21: Seminal vesicle
+22: Sin clasificación
+23: Stroma
+24: Tumor
