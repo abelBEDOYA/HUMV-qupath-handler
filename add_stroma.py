@@ -281,7 +281,9 @@ class StromaAdder:
         images_subdir: str = "images",
         masks_subdir: str = "masks",
         tile_size: int = 2048,
-        detector_params: Dict[str, Any] | None = None
+        detector_params: Dict[str, Any] | None = None,
+        exclude_buffer: int = 20,
+        erode_tissue: int = 5
     ):
         self.dataset_dir = Path(dataset_dir)
         self.images_dir = self.dataset_dir / images_subdir
@@ -295,6 +297,8 @@ class StromaAdder:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         self.tile_size = tile_size
+        self.exclude_buffer = exclude_buffer
+        self.erode_tissue = erode_tissue
         
         params = detector_params or {}
         self.detector = TissueDetector(**params)
@@ -337,11 +341,14 @@ class StromaAdder:
         
         print(f"Encontrados {len(pairs)} pares imagen-máscara")
         print(f"Salida: {self.output_dir}")
-        print(f"Parámetros de detección:")
+        print(f"Parámetros de detección de tejido:")
         print(f"  - blur_radius: {self.detector.blur_radius}")
         print(f"  - threshold: {self.detector.threshold}")
         print(f"  - min_area: {self.detector.min_area}")
         print(f"  - dilate_radius: {self.detector.dilate_radius}")
+        print(f"Parámetros de exclusión:")
+        print(f"  - exclude_buffer: {self.exclude_buffer} px (zona de exclusión alrededor de etiquetas)")
+        print(f"  - erode_tissue: {self.erode_tissue} px (erosión de máscara de tejido)")
         print()
         
         for i, (img_path, mask_path) in enumerate(pairs):
@@ -434,7 +441,22 @@ class StromaAdder:
                 
                 tissue_mask = self.detector.detect(img_tile)
                 
-                stroma_candidates = tissue_mask & (mask_tile == BACKGROUND_CLASS_ID)
+                # Erosionar tejido detectado (opcional)
+                if self.erode_tissue > 0:
+                    tissue_mask = binary_erosion(tissue_mask, iterations=self.erode_tissue)
+                
+                # Crear zona de exclusión dilatando etiquetas existentes
+                if self.exclude_buffer > 0:
+                    labels_present = mask_tile > 0
+                    exclusion_zone = binary_dilation(labels_present, iterations=self.exclude_buffer)
+                else:
+                    exclusion_zone = np.zeros_like(mask_tile, dtype=bool)
+                
+                # Solo poner stroma donde:
+                # - Hay tejido (erosionado)
+                # - No hay etiqueta
+                # - No está en zona de exclusión
+                stroma_candidates = tissue_mask & (mask_tile == BACKGROUND_CLASS_ID) & ~exclusion_zone
                 
                 mask_tile[stroma_candidates] = STROMA_CLASS_ID
                 stroma_pixels_added += np.sum(stroma_candidates)
@@ -508,12 +530,16 @@ def preview_thresholding(
     image_path: str,
     mask_path: str,
     detector: TissueDetector,
+    exclude_buffer: int = 20,
+    erode_tissue: int = 5,
     level: int = 2
 ) -> None:
     """Muestra un preview del thresholding para ajustar parámetros."""
     import matplotlib.pyplot as plt
     
     print(f"Cargando preview (nivel {level})...")
+    print(f"  exclude_buffer: {exclude_buffer} px")
+    print(f"  erode_tissue: {erode_tissue} px")
     
     with PyramidReader(image_path) as img_reader, \
          PyramidReader(mask_path) as mask_reader:
@@ -529,12 +555,36 @@ def preview_thresholding(
         print(f"  Imagen preview: {img_data.shape}")
         print(f"  Máscara preview: {mask_data.shape}")
         
-        tissue_mask = detector.detect(img_data)
+        # Detectar tejido
+        tissue_mask_original = detector.detect(img_data)
         
-        stroma_candidates = tissue_mask & (mask_data == BACKGROUND_CLASS_ID)
+        # Erosionar tejido (opcional)
+        if erode_tissue > 0:
+            tissue_mask = binary_erosion(tissue_mask_original, iterations=erode_tissue)
+        else:
+            tissue_mask = tissue_mask_original
+        
+        # Crear zona de exclusión dilatando etiquetas existentes
+        if exclude_buffer > 0:
+            labels_present = mask_data > 0
+            exclusion_zone = binary_dilation(labels_present, iterations=exclude_buffer)
+        else:
+            exclusion_zone = np.zeros_like(mask_data, dtype=bool)
+        
+        # Calcular stroma candidates con la nueva lógica
+        stroma_candidates = tissue_mask & (mask_data == BACKGROUND_CLASS_ID) & ~exclusion_zone
         
         preview_mask = mask_data.copy()
         preview_mask[stroma_candidates] = STROMA_CLASS_ID
+        
+        # Crear visualización RGB para mostrar zonas
+        # Verde: donde se pondrá stroma
+        # Rojo: zona de exclusión (no se pone stroma)
+        # Gris: tejido original detectado
+        zones_rgb = np.zeros((*tissue_mask_original.shape, 3), dtype=np.uint8)
+        zones_rgb[tissue_mask_original] = [128, 128, 128]  # Tejido detectado (gris)
+        zones_rgb[exclusion_zone & tissue_mask] = [255, 100, 100]  # Zona exclusión (rojo)
+        zones_rgb[stroma_candidates] = [100, 255, 100]  # Stroma final (verde)
         
         fig, axes = plt.subplots(2, 2, figsize=(14, 14))
         
@@ -546,9 +596,10 @@ def preview_thresholding(
         axes[0, 0].set_title("Imagen original")
         axes[0, 0].axis('off')
         
-        axes[0, 1].imshow(tissue_mask, cmap='gray', interpolation='nearest')
-        axes[0, 1].set_title(f"Tejido detectado\n(blur={detector.blur_radius}, "
-                            f"thresh={detector.threshold}, dilate={detector.dilate_radius})")
+        axes[0, 1].imshow(zones_rgb, interpolation='nearest')
+        axes[0, 1].set_title(f"Zonas de stroma\n"
+                            f"Gris=tejido, Rojo=excluido (buffer={exclude_buffer}px), "
+                            f"Verde=stroma")
         axes[0, 1].axis('off')
         
         axes[1, 0].imshow(mask_data, cmap=mask_cmap, norm=mask_norm, interpolation='nearest')
@@ -680,6 +731,18 @@ Estructura esperada del dataset:
         default=2,
         help="Nivel de pirámide para preview (default: 2)"
     )
+    parser.add_argument(
+        "--exclude-buffer", "-x",
+        type=int,
+        default=20,
+        help="Buffer en píxeles alrededor de etiquetas donde NO poner stroma (default: 20)"
+    )
+    parser.add_argument(
+        "--erode-tissue",
+        type=int,
+        default=5,
+        help="Erosión de la máscara de tejido en píxeles (default: 5, 0=desactivado)"
+    )
     
     return parser.parse_args()
 
@@ -721,6 +784,8 @@ def main() -> None:
             str(img_path),
             str(mask_path),
             adder.detector,
+            exclude_buffer=args.exclude_buffer,
+            erode_tissue=args.erode_tissue,
             level=args.preview_level
         )
     else:
@@ -734,7 +799,9 @@ def main() -> None:
             images_subdir=args.images_dir,
             masks_subdir=args.masks_dir,
             tile_size=args.tile_size,
-            detector_params=detector_params
+            detector_params=detector_params,
+            exclude_buffer=args.exclude_buffer,
+            erode_tissue=args.erode_tissue
         )
         
         adder.process_all(specific_name=args.name)
