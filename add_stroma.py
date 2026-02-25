@@ -56,6 +56,34 @@ CLASS_NAMES = {
     24: "Tumor",
 }
 
+CLASS_COLORS_HEX = [
+    "#000000",  # 0: Background (negro)
+    "#FF6B6B",  # 1: Abnormal secretions
+    "#FFE66D",  # 2: Adipose tissue
+    "#4ECDC4",  # 3: Artifact
+    "#95E1D3",  # 4: Atypical intraductal proliferation
+    "#F38181",  # 5: Bening gland
+    "#AA96DA",  # 6: Blood vessels
+    "#FCBAD3",  # 7: Fibromuscular bundles
+    "#A8D8EA",  # 8: HGPIN
+    "#FF9F43",  # 9: Immune cells
+    "#6A0572",  # 10: Intestinal glands and mucus
+    "#AB83A1",  # 11: Intraductal carcinoma
+    "#E84545",  # 12: Mitosis
+    "#903749",  # 13: Muscle
+    "#53354A",  # 14: Necrosis
+    "#2B2E4A",  # 15: Negative
+    "#E9D5CA",  # 16: Nerve
+    "#BBDED6",  # 17: Nerve ganglion
+    "#61C0BF",  # 18: Normal secretions
+    "#FAE3D9",  # 19: Prominent nucleolus
+    "#CC0000",  # 20: Red blood cells
+    "#FFB6B9",  # 21: Seminal vesicle
+    "#8AC6D1",  # 22: Sin clasificación
+    "#F9ED69",  # 23: Stroma
+    "#B83B5E",  # 24: Tumor
+]
+
 
 class TissueDetector:
     """
@@ -510,23 +538,49 @@ def preview_thresholding(
         
         fig, axes = plt.subplots(2, 2, figsize=(14, 14))
         
+        from matplotlib.colors import ListedColormap, BoundaryNorm
+        mask_cmap = ListedColormap(CLASS_COLORS_HEX)
+        mask_norm = BoundaryNorm(np.arange(-0.5, 25.5, 1), mask_cmap.N)
+        
         axes[0, 0].imshow(img_data)
         axes[0, 0].set_title("Imagen original")
         axes[0, 0].axis('off')
         
-        axes[0, 1].imshow(tissue_mask, cmap='gray')
+        axes[0, 1].imshow(tissue_mask, cmap='gray', interpolation='nearest')
         axes[0, 1].set_title(f"Tejido detectado\n(blur={detector.blur_radius}, "
                             f"thresh={detector.threshold}, dilate={detector.dilate_radius})")
         axes[0, 1].axis('off')
         
-        axes[1, 0].imshow(mask_data, cmap='tab20', vmin=0, vmax=24)
+        axes[1, 0].imshow(mask_data, cmap=mask_cmap, norm=mask_norm, interpolation='nearest')
         axes[1, 0].set_title("Máscara original")
         axes[1, 0].axis('off')
         
-        axes[1, 1].imshow(preview_mask, cmap='tab20', vmin=0, vmax=24)
+        axes[1, 1].imshow(preview_mask, cmap=mask_cmap, norm=mask_norm, interpolation='nearest')
         axes[1, 1].set_title(f"Máscara con stroma añadido\n"
                             f"(píxeles nuevos: {np.sum(stroma_candidates):,})")
         axes[1, 1].axis('off')
+        
+        all_axes = [axes[0, 0], axes[0, 1], axes[1, 0], axes[1, 1]]
+        syncing = [False]
+        
+        def sync_axes(source_ax):
+            if syncing[0]:
+                return
+            syncing[0] = True
+            try:
+                xlim = source_ax.get_xlim()
+                ylim = source_ax.get_ylim()
+                for ax in all_axes:
+                    if ax is not source_ax:
+                        ax.set_xlim(xlim)
+                        ax.set_ylim(ylim)
+                fig.canvas.draw_idle()
+            finally:
+                syncing[0] = False
+        
+        for ax in all_axes:
+            ax.callbacks.connect('xlim_changed', lambda event_ax, src=ax: sync_axes(src))
+            ax.callbacks.connect('ylim_changed', lambda event_ax, src=ax: sync_axes(src))
         
         plt.suptitle(f"Preview - {Path(image_path).name}", fontsize=12)
         plt.tight_layout()
@@ -642,6 +696,8 @@ def main() -> None:
     }
     
     if args.preview:
+        import random
+        
         adder = StromaAdder(
             args.dataset_dir,
             output_dir=args.output,
@@ -658,8 +714,8 @@ def main() -> None:
             print("No se encontraron pares imagen-máscara")
             sys.exit(1)
         
-        img_path, mask_path = pairs[0]
-        print(f"Preview de: {img_path.name}")
+        img_path, mask_path = random.choice(pairs)
+        print(f"Preview de: {img_path.name} (seleccionada al azar de {len(pairs)})")
         
         preview_thresholding(
             str(img_path),
