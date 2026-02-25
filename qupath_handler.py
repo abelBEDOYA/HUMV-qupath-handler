@@ -289,8 +289,8 @@ class QuPathHandler:
     def __init__(
         self, 
         data_dir: str,
-        images_subdir: str = "images1",
-        masks_subdir: str = "masks1"
+        images_subdir: str = "images",
+        masks_subdir: str = "masks"
     ):
         """
         Args:
@@ -705,7 +705,7 @@ class QuPathHandler:
 
 
 def main():
-    """Ejemplo de uso desde línea de comandos."""
+    """Recorre todas las imágenes del dataset y las visualiza."""
     import argparse
     
     parser = argparse.ArgumentParser(
@@ -713,14 +713,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos:
-  # Visualizar un par imagen/máscara
-  python qupath_handler.py /ruta/datos --name imagen1
-  
-  # Listar imágenes disponibles
-  python qupath_handler.py /ruta/datos --list
+  # Visualizar todas las imágenes del dataset
+  python qupath_handler.py /ruta/datos
   
   # Especificar nivel de resolución
-  python qupath_handler.py /ruta/datos --name imagen1 --level 2
+  python qupath_handler.py /ruta/datos --level 2
 
 Estructura de directorios esperada:
   data_dir/
@@ -730,16 +727,15 @@ Estructura de directorios esperada:
     masks/
       imagen1__mask_multiclass.ome.tif
       imagen2__mask_multiclass.ome.tif
+
+Cierra cada ventana para pasar a la siguiente imagen.
         """
     )
     
-    parser.add_argument("data_dir", help="Directorio con los datos")
-    parser.add_argument("--name", "-n", help="Nombre de la imagen a visualizar")
-    parser.add_argument("--level", "-l", type=int, default=None, help="Nivel de pirámide")
-    parser.add_argument("--list", action="store_true", help="Listar imágenes disponibles")
-    parser.add_argument("--images-dir", default="images1", help="Subdirectorio de imágenes")
-    parser.add_argument("--masks-dir", default="masks1", help="Subdirectorio de máscaras")
-    parser.add_argument("--interactive", "-i", action="store_true", help="Modo interactivo con slider")
+    parser.add_argument("data_dir", help="Directorio del dataset con images/ y masks/")
+    parser.add_argument("--level", "-l", type=int, default=None, help="Nivel de pirámide (default: auto)")
+    parser.add_argument("--images-dir", default="images", help="Subdirectorio de imágenes")
+    parser.add_argument("--masks-dir", default="masks", help="Subdirectorio de máscaras")
     
     args = parser.parse_args()
     
@@ -749,39 +745,33 @@ Estructura de directorios esperada:
         masks_subdir=args.masks_dir
     )
     
-    if args.list:
-        images = handler.list_images()
-        print(f"\nImágenes encontradas ({len(images)}):")
-        for img in images:
-            print(f"  - {img}")
+    images = handler.list_images()
+    
+    if not images:
+        print("No se encontraron imágenes.")
         return
     
-    if args.name is None:
-        images = handler.list_images()
-        if images:
-            args.name = images[0]
-            print(f"Usando primera imagen: {args.name}")
-        else:
-            print("No se encontraron imágenes.")
-            return
+    print(f"\nEncontradas {len(images)} imágenes")
+    print("Cierra cada ventana para pasar a la siguiente.\n")
     
-    try:
-        handler.load_pair(args.name, level=args.level)
+    for i, name in enumerate(images):
+        print(f"[{i+1}/{len(images)}] {name}")
         
-        print("\nMetadatos:")
-        meta = handler.get_metadata()
-        print(f"  Nombre: {meta.get('name')}")
-        print(f"  Tamaño base: {meta.get('base_size')}")
-        print(f"  Niveles imagen: {len(meta.get('image_levels', []))}")
-        for lvl in meta.get('image_levels', []):
-            print(f"    {lvl['level']}: {lvl['size']} (ds: {lvl['downsample']:.0f}x)")
-        
-        if args.interactive:
-            handler.visualize_interactive()
-        else:
+        try:
+            handler.load_pair(name, level=args.level)
+            
+            meta = handler.get_metadata()
+            print(f"  Tamaño base: {meta.get('base_size')}")
+            print(f"  Nivel cargado: {meta.get('current_level')}")
+            
             handler.visualize()
-    finally:
-        handler.close()
+            
+        except Exception as e:
+            print(f"  ERROR: {e}")
+        finally:
+            handler.close()
+    
+    print("\nVisualizacion completada.")
 
 
 if __name__ == "__main__":

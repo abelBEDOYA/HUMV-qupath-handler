@@ -296,7 +296,7 @@ def visualize_geojson(
 
 def collect_all_classes_and_counts(
     geojson_files: list[str]
-) -> tuple[set[str], dict[str, int], dict[str, int]]:
+) -> tuple[set[str], dict[str, int], dict[str, int], dict[str, dict[str, int]]]:
     """
     Recolecta todas las clases únicas, cuenta etiquetas por archivo y por clase.
     
@@ -305,24 +305,30 @@ def collect_all_classes_and_counts(
         - conjunto_de_clases
         - diccionario_filepath->num_etiquetas
         - diccionario_clase->num_instancias_totales
+        - diccionario_filepath->diccionario_clase->num_instancias (desglose por archivo)
     """
     all_classes: set[str] = set()
     file_counts: dict[str, int] = {}
     class_counts: dict[str, int] = {}
+    file_class_counts: dict[str, dict[str, int]] = {}
     
     for filepath in geojson_files:
         try:
             features = load_geojson(filepath)
             file_counts[filepath] = len(features)
+            file_class_counts[filepath] = {}
+            
             for feature in features:
                 class_name = get_classification_name(feature)
                 all_classes.add(class_name)
                 class_counts[class_name] = class_counts.get(class_name, 0) + 1
+                file_class_counts[filepath][class_name] = file_class_counts[filepath].get(class_name, 0) + 1
         except Exception as e:
             print(f"Error leyendo {filepath}: {e}")
             file_counts[filepath] = 0
+            file_class_counts[filepath] = {}
     
-    return all_classes, file_counts, class_counts
+    return all_classes, file_counts, class_counts, file_class_counts
 
 
 def parse_args() -> argparse.Namespace:
@@ -367,23 +373,31 @@ def main() -> None:
         print(">>> MODO: Solo etiquetas con más de una lista (--only-multi)")
     print("Recolectando clases y contando etiquetas de todos los archivos...")
 
-    all_classes, file_counts, class_counts = collect_all_classes_and_counts(geojson_files)
+    all_classes, file_counts, class_counts, file_class_counts = collect_all_classes_and_counts(geojson_files)
     class_colors = generate_class_colors(all_classes)
 
     print(f"\n{'='*60}")
-    print("RESUMEN DE ETIQUETAS POR IMAGEN")
+    print("RESUMEN DE ETIQUETAS POR IMAGEN (desglose por clase)")
     print(f"{'='*60}")
     total_labels = 0
     for filepath in geojson_files:
         count = file_counts.get(filepath, 0)
         total_labels += count
-        print(f"  {os.path.basename(filepath)}: {count} etiquetas")
-    print(f"{'='*60}")
+        filename = os.path.basename(filepath)
+        print(f"\n  {filename}: {count} etiquetas")
+        
+        # Mostrar desglose por clase para este archivo
+        classes_in_file = file_class_counts.get(filepath, {})
+        for class_name in sorted(classes_in_file.keys()):
+            class_count = classes_in_file[class_name]
+            print(f"      - {class_name}: {class_count}")
+    
+    print(f"\n{'='*60}")
     print(f"TOTAL: {total_labels} etiquetas en {len(geojson_files)} imágenes")
     print(f"{'='*60}")
 
     print(f"\n{'='*60}")
-    print(f"CLASES ENCONTRADAS ({len(all_classes)}) - INSTANCIAS TOTALES")
+    print(f"CLASES ENCONTRADAS ({len(all_classes)}) - SUMA TOTAL TODAS LAS IMÁGENES")
     print(f"{'='*60}")
     for class_name in sorted(class_counts.keys()):
         count = class_counts[class_name]
